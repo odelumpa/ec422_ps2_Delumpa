@@ -1,0 +1,170 @@
+---
+title: "Problem Set 2"
+author: "Owen Delumpa"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+---
+
+**GitHub repo:** <https://github.com/odelumpa/ec422_ps2_Delumpa>
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(tidyquant)
+library(tidyverse)
+library(knitr)
+```
+
+
+## Data
+
+I created a plot that explains the gap between Oregon's and the rest of the U.S. unemployment rate to see how Oregon's labor market does compared to the rest of the nation. The dots above the dashed line indicate that Oregon's rate is higher than the rest of the nations. Oregon's rate usually runs higher and the gap tends to grow during recession. It reaches about 2 percentage points in the early 1980s and 2000s. Oregon even surpassed the nation in the 1990s and at the start of COVID in 2020. The gap has since grown to about a percentage point.
+
+```{r}
+unemp_raw <- read_rds("data/unemp_raw.rds")
+
+head(unemp_raw)
+```
+
+## Wrangling
+
+```{I renamed price to unemployment_rate, added a readable region label, filled in the missing October 2025 value (from the government shutdown) with each region's September 2025 value, and computed the month-over-month change in the unemployment rate.}```
+
+unemp <- unemp_raw |>
+  rename(unemployment_rate = price) |>
+  mutate(
+    region = case_when(
+      symbol == "UNRATE" ~ "United States",
+      symbol == "ORUR" ~ "Oregon",
+      symbol == "CAUR" ~ "California",
+      symbol == "TXUR" ~ "Texas",
+      symbol == "NYUR" ~ "New York"
+    )
+  )
+
+unemp <- unemp |>
+  arrange(region, date) |>
+  group_by(region) |>
+  mutate(
+    unemployment_rate = replace(
+      unemployment_rate,
+      date == as.Date("2025-10-01"),
+      unemployment_rate[date == as.Date("2025-09-01")]
+    )
+  ) |>
+  ungroup()
+
+unemp <- unemp |>
+  arrange(region, date) |>
+  group_by(region) |>
+  mutate(unemployment_rate_change = unemployment_rate - lag(unemployment_rate)) |>
+  ungroup()
+
+unemp_recent <- unemp |>
+  filter(date >= as.Date("2015-01-01"))
+
+unemp_summary <- unemp |>
+  group_by(region) |>
+  summarize(
+    mean_rate = mean(unemployment_rate, na.rm = TRUE),
+    min_rate = min(unemployment_rate, na.rm = TRUE),
+    max_rate = max(unemployment_rate, na.rm = TRUE)
+  )
+
+unemp_recent_summary <- unemp_recent |>
+  group_by(region) |>
+  summarize(
+    mean_rate = mean(unemployment_rate, na.rm = TRUE),
+    min_rate = min(unemployment_rate, na.rm = TRUE),
+    max_rate = max(unemployment_rate, na.rm = TRUE)
+  )
+
+unemp_no_covid <- unemp |>
+  filter(year(date) != 2020)
+
+unemp_top_increases_no_covid <- unemp_no_covid |>
+  slice_max(unemployment_rate_change, n = 5, with_ties = TRUE)
+
+unemp_top_decreases_no_covid <- unemp_no_covid |>
+  slice_min(unemployment_rate_change, n = 5, with_ties = TRUE)
+
+The first table shows the mean, minimum and maximum unemployment rate (in percent) for each region over the full sample.
+
+kable(unemp_summary, digits = 2,
+      caption = "Unemployment Rate Summary by Region, 1976-Present (%)")
+
+The second table shows the same statistics for January 2015 onward.
+
+kable(unemp_recent_summary, digits = 2,
+      caption = "Unemployment Rate Summary by Region, 2015-Present (%)")
+
+The next two tables show the five largest month-over-month increases and decreases in the unemployment rate (in percentage points) across all regions, excluding 2020 so the COVID shock doesn't dominate.
+
+unemp_top_increases_no_covid |>
+  select(region, date, unemployment_rate, unemployment_rate_change) |>
+  kable(digits = 2,
+        caption = "Largest Monthly Increases in Unemployment, Excluding 2020")
+
+unemp_top_decreases_no_covid |>
+  select(region, date, unemployment_rate, unemployment_rate_change) |>
+  kable(digits = 2,
+        caption = "Largest Monthly Decreases in Unemployment, Excluding 2020")
+
+```
+
+## Vizualization
+
+This plot shows the unemployment rate for all five regions on one set of axes.
+
+ggplot(unemp, aes(x = date, y = unemployment_rate, color = region)) +
+  geom_line() +
+  labs(title = "Monthly Unemployment Rate, 1976-Present",
+       x = "Date",
+       y = "Unemployment Rate (%)",
+       color = "Region") +
+  theme_minimal()
+
+This plot shows the same data with a separate panel for each region, which makes each region's pattern easier to see.
+
+ggplot(unemp, aes(x = date, y = unemployment_rate, color = region)) +
+  geom_line() +
+  facet_wrap(~ region) +
+  labs(title = "Monthly Unemployment Rate by Region, 1976-Present",
+       x = "Date",
+       y = "Unemployment Rate (%)",
+       color = "Region") +
+  theme_minimal()
+
+This bar chart shows each region's average unemployment rate over the full sample, ordered from lowest to highest.
+
+ggplot(unemp_summary, aes(x = fct_reorder(region, mean_rate), y = mean_rate)) +
+  geom_col() +
+  labs(title = "Average Unemployment Rate by Region, 1976-Present",
+       x = "Region",
+       y = "Mean Unemployment Rate (%)") +
+  theme_minimal()
+
+I plotted the gap between Oregon's and the U.S. unemployment rate to compare Oregon's job market with the nation's. Oregon's rate is usually higher, and the gap tends to grow during recessions.
+
+unemp_gap <- unemp |>
+  filter(region %in% c("Oregon", "United States")) |>
+  select(date, region, unemployment_rate) |>
+  pivot_wider(names_from = region, values_from = unemployment_rate) |>
+  mutate(gap = Oregon - `United States`)
+
+ggplot(unemp_gap, aes(x = date, y = gap)) +
+  geom_line() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Oregon Unemployment Rate Minus U.S. Unemployment Rate",
+       x = "Date",
+       y = "Percentage Points") +
+  theme_minimal()
+```
+
+## Reflection
+
+Reading in the data and making the plots was probably the easiest part because the start code kind of walked me through it. I got kinda stuck when I was actually running code out of order and I kept getting errors that said something hadn't been created yet. Setting up the GitHub repository was a little confusing at first because I just couldn't tell if everything was working but it did end up working. This was a good problem set to help me with getting more comfortable with RStudio.
